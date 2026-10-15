@@ -7,33 +7,26 @@ local State = require(".lib-state")
 
 CONFIG.defaults = {
   enable_debug = false,
-  debug_log_file = nil, -- e.g. "/tmp/sshfs-debug.log" for tail -f style output
-  custom_hosts_file = XDG_DATA_HOME .. "/yazi/sshfs.list", -- list of remembered aliases
+  debug_log_file = nil, -- e.g. "/tmp/davfs-debug.log"
+  custom_hosts_file = XDG_DATA_HOME .. "/yazi/davfs.list",
   mount_dir = HOME .. "/mnt",
-  default_mount_point = "auto", -- "auto" (prompt), "home", or "root"
-  default_user = "auto", -- "auto" (use SSH config user) or "prompt" (ask user)
-  sshfs_options = {
-    "reconnect",
-    "ConnectTimeout=5",
-    "compression=yes",
-    "ServerAliveInterval=15",
-    "ServerAliveCountMax=3",
+  davfs_options = {
+    "user",
+    "noexec",
+    "file_mode=0664",
+    "dir_mode=0775",
   },
-  connections = {
-    control_persist = "10m", -- how long the ControlMaster socket stays alive after last use
-    socket_dir = HOME .. "/.ssh/sockets", -- where ControlMaster sockets are stored
-  },
-  global_paths = {}, -- remote paths offered for all hosts, e.g. { "/", "/var/log" }
-  host_paths = {}, -- per-host paths, e.g. { myserver = "/src/www" }
+  global_paths = {}, -- URL suffixes offered for all hosts, e.g. { "/Documents", "/Projects" }
+  host_paths = {},   -- per-host URL suffixes, e.g. { ["https://example.com"] = { "/share", "/docs" } }
   on_mount = {
-    auto_jump = true, -- jump to the mount directory after a successful mount
+    auto_jump = true,
   },
   on_exit = {
-    clean_mount_folders = true, -- delete empty mount directories after unmounting
+    clean_mount_folders = true,
   },
   ui = {
-    menu_max = 15, -- max items before switching from which-key menu to fzf/filter (max 36)
-    picker = "auto", -- "auto", "fzf", or "menu"
+    menu_max = 15,
+    picker = "auto",
   },
 }
 
@@ -71,3 +64,4 @@ function CONFIG.get()
 end
 
 return CONFIG
+

@@ -42,7 +42,7 @@ local function active_mounts_or_warn(warn_msg)
   return mounts
 end
 
---- Check if an alias already exists in the custom hosts file.
+--- Check if a URL already exists in the custom hosts file.
 ---@param alias string
 ---@param hosts_file string
 ---@return boolean
@@ -54,47 +54,30 @@ local function alias_exists(alias, hosts_file)
   return false
 end
 
---- Add a custom SSH host alias to the saved hosts file.
+--- Add a custom WebDAV URL to the saved hosts file.
 function API.add()
   local Prompt = require(".ui-prompt")
   local State = require(".lib-state")
   local config = State.get(State.KEY.CONFIG)
 
-  local host = Prompt.input("Enter SSH host:")
-  if not host then return end
-  if not host:match("^[%w_.%-@]+:?[%w%-%.]*$") then
-    Notify.error("Invalid SSH host string")
+  local url = Prompt.input("Enter WebDAV URL:")
+  if not url then return end
+  if not url:match("^https?://") then
+    Notify.error("URL must start with http:// or https://")
     return
   end
-  if alias_exists(host, config.custom_hosts_file) then
+  if alias_exists(url, config.custom_hosts_file) then
     Notify.warn("Host already exists")
     return
   end
 
-  local remote_dir = Prompt.input("Remote directory (optional, leave blank for ~):")
-  if remote_dir == nil then return end
-
-  local alias = host
-  if remote_dir ~= "" then
-    if not remote_dir:match("^/") then
-      Notify.error("Remote directory must be an absolute path starting with /")
-      return
-    end
-    alias = host .. ":" .. remote_dir
-  end
-
-  if alias_exists(alias, config.custom_hosts_file) then
-    Notify.warn("Host alias already exists")
-    return
-  end
-
-  State.append_line(config.custom_hosts_file, alias)
+  State.append_line(config.custom_hosts_file, url)
   local Hosts = require(".lib-hosts")
   Hosts.invalidate()
-  Notify.info("Added %s to custom hosts", alias)
+  Notify.info("Added %s to custom hosts", url)
 end
 
---- Remove a custom SSH host alias from the saved hosts file.
+--- Remove a custom WebDAV URL from the saved hosts file.
 function API.remove()
   local State = require(".lib-state")
   local config = State.get(State.KEY.CONFIG)
@@ -134,18 +117,18 @@ function API.remove()
   Notify.info('Removed "%s" from custom hosts', alias)
 end
 
---- Mount a remote host.
+--- Mount a remote WebDAV host.
 ---@param args table job args (args.jump overrides on_mount.auto_jump)
 function API.mount(args)
   local State = require(".lib-state")
   local Picker = require(".ui-picker")
   local Hosts = require(".lib-hosts")
-  local Sshfs = require(".lib-sshfs")
+  local Davfs = require(".lib-davfs")
   local config = State.get(State.KEY.CONFIG)
   local hosts = Hosts.get_all(config.custom_hosts_file)
 
   local chosen = (#hosts == 1) and hosts[1] or Picker.choose("Mount which host?", hosts, config)
-  if chosen then Sshfs.mount(chosen, { jump = args and args.jump or nil }) end
+  if chosen then Davfs.mount(chosen, { jump = args and args.jump or nil }) end
 end
 
 --- Jump to an active mount point.
@@ -166,7 +149,7 @@ end
 
 --- Unmount an active mount point.
 function API.unmount()
-  local mounts = active_mounts_or_warn("No SSHFS mounts are active")
+  local mounts = active_mounts_or_warn("No davfs mounts are active")
   if not mounts then return end
 
   local State = require(".lib-state")
@@ -186,46 +169,12 @@ function API.unmount()
   local clean = config.on_exit and config.on_exit.clean_mount_folders
   local Mount = require(".lib-mount")
   if Mount.remove(mount.path, clean) then
-    local hostname = mount.alias:match("^([^%-]+)") or mount.alias
-    local Ssh = require(".lib-ssh")
     local Lockfile = require(".lib-lockfile")
-    Ssh.close_socket(hostname, config)
     Lockfile.release(mount.alias)
     Notify.info("Unmounted %s", mount.alias)
   else
     Notify.error("Failed to unmount %s", mount.alias)
   end
-end
-
---- Open an interactive SSH terminal to a mounted host.
-function API.terminal()
-  local mounts = active_mounts_or_warn("No active mounts")
-  if not mounts then return end
-
-  local State = require(".lib-state")
-  local config = State.get(State.KEY.CONFIG)
-  local labels = mount_labels(mounts)
-  local Picker = require(".ui-picker")
-  local choice = Picker.choose("Open terminal to:", labels, config)
-  if not choice then return end
-
-  local mount = find_by_label(labels, choice, mounts)
-  if not mount then return end
-
-  local hostname = mount.alias:match("^([^%-]+)") or mount.alias
-  local ssh_args = { "ssh" }
-
-  local Ssh = require(".lib-ssh")
-  if Ssh.socket_alive(hostname, config) then
-    local sock = Ssh.socket_path(hostname, config)
-    ssh_args[#ssh_args + 1] = "-o"
-    ssh_args[#ssh_args + 1] = "ControlPath=" .. sock
-    ssh_args[#ssh_args + 1] = "-o"
-    ssh_args[#ssh_args + 1] = "ControlMaster=no"
-  end
-
-  ssh_args[#ssh_args + 1] = hostname
-  ya.emit("shell", { table.concat(ssh_args, " "), block = true })
 end
 
 --- Navigate to the mount base directory.
@@ -243,41 +192,31 @@ function API.hosts()
   ya.emit("cd", { parent, raw = true })
 end
 
---- Navigate to the ~/.ssh/ directory.
-function API.ssh_config()
-  ya.emit("cd", { HOME .. "/.ssh/", raw = true })
-end
-
 --- Show the interactive top-level menu.
 function API.menu()
   local choice = ya.which({
-    title = "SSHFS",
+    title = "davfs",
     cands = {
       { on = "m", desc = "Mount" },
       { on = "u", desc = "Unmount" },
-      { on = "t", desc = "Terminal" },
       { on = "a", desc = "Add host" },
       { on = "r", desc = "Remove host" },
       { on = "h", desc = "Go to mount home" },
-      { on = "c", desc = "Open ~/.ssh/" },
       { on = "l", desc = "Open custom host list" },
     },
   })
 
   local dispatch = {
-    [1] = function()
-      API.mount({})
-    end,
+    [1] = function() API.mount({}) end,
     [2] = API.unmount,
-    [3] = API.terminal,
-    [4] = API.add,
-    [5] = API.remove,
-    [6] = API.home,
-    [7] = API.ssh_config,
-    [8] = API.hosts,
+    [3] = API.add,
+    [4] = API.remove,
+    [5] = API.home,
+    [6] = API.hosts,
   }
 
   if choice and dispatch[choice] then dispatch[choice]() end
 end
 
 return API
+

@@ -2,17 +2,14 @@
 
 local MOUNT = {}
 
---- Parse `mount` output for sshfs entries under a given root directory.
+--- Parse `mount` output for davfs entries under a given root directory.
 ---@param mount_output string
 ---@param root string
 ---@return { path: string, remote: string }[]
 local function parse_mount_output(mount_output, root)
   local mounts = {}
   local root_esc = root:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-
-  local is_macos = io.popen("uname") ~= nil and io.popen("uname"):read("*l") == "Darwin"
-  local pattern = not is_macos and ("^(.+)%son%s(" .. root_esc .. "/.-)%s+type%s+fuse%.sshfs")
-    or ("^(.+)%son%s(" .. root_esc .. "/[^%s]+)%s+%(.*[mo][as][cx]fuse")
+  local pattern = ("^(.+)%son%s(" .. root_esc .. "/[^%s]+)%s+type%s+davfs")
 
   for line in mount_output:gmatch("[^\r\n]+") do
     local remote, path = line:match(pattern)
@@ -21,15 +18,14 @@ local function parse_mount_output(mount_output, root)
   return mounts
 end
 
---- Try findmnt first (Linux, more reliable), fall back to mount output parsing.
+--- Try findmnt first, fall back to parsing `mount` output.
 ---@param mount_dir string
 ---@return { path: string, remote: string }[]
-local function get_sshfs_mounts(mount_dir)
+local function get_davfs_mounts(mount_dir)
   local root_pat = "^" .. mount_dir:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1") .. "/"
 
-  -- Prefer findmnt on Linux
   local child, _ = Command("findmnt")
-    :arg({ "-t", "fuse.sshfs", "-o", "SOURCE,TARGET", "--noheadings", "-l" })
+    :arg({ "-t", "davfs", "-o", "SOURCE,TARGET", "--noheadings", "-l" })
     :stdout(Command.PIPED)
     :stderr(Command.PIPED)
     :spawn()
@@ -45,7 +41,6 @@ local function get_sshfs_mounts(mount_dir)
     end
   end
 
-  -- Fall back to parsing `mount` output
   local mount_child, _ = Command("mount"):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
   if mount_child then
     local mout = mount_child:wait_with_output()
@@ -55,7 +50,7 @@ local function get_sshfs_mounts(mount_dir)
   return {}
 end
 
---- Return true if `path` is an active sshfs mount point.
+--- Return true if `path` is an active davfs mount point.
 ---@param path string
 ---@param url Url
 ---@param mount_dir string
@@ -63,24 +58,23 @@ end
 function MOUNT.is_active(path, url, mount_dir)
   local Fs = require(".lib-fileservice")
   if not Fs.is_dir(url) then return false end
-  local mounts = get_sshfs_mounts(mount_dir)
+  local mounts = get_davfs_mounts(mount_dir)
   if #mounts > 0 then
     for _, m in ipairs(mounts) do
       if m.path == path then return true end
     end
     return false
   end
-  -- Last resort: non-empty directory implies something is mounted
   return not Fs.is_dir_empty(url)
 end
 
---- List all active sshfs mounts under mount_dir.
+--- List all active davfs mounts under mount_dir.
 ---@param mount_dir string
 ---@return { alias: string, path: string, remote: string|nil }[]
 function MOUNT.list(mount_dir)
   local Notify = require(".lib-notify")
   local mounts = {}
-  local parsed = get_sshfs_mounts(mount_dir)
+  local parsed = get_davfs_mounts(mount_dir)
 
   if #parsed > 0 then
     for _, m in ipairs(parsed) do
@@ -91,7 +85,6 @@ function MOUNT.list(mount_dir)
       end
     end
   else
-    -- Fallback: scan mount_dir for non-empty directories
     local files, err = fs.read_dir(Url(mount_dir), { resolve = false })
     if not files then
       Notify.debug("Could not read mount_dir: %s", tostring(err))
@@ -112,24 +105,20 @@ function MOUNT.list(mount_dir)
 end
 
 --- Unmount a mount point, trying several unmount commands in order.
---- If `clean_dir` is true, removes the (now empty) directory afterwards.
 ---@param path string
 ---@param clean_dir? boolean
 ---@return boolean
 function MOUNT.remove(path, clean_dir)
   local attempts = {
-    -- 1. Clean
     { "fusermount", { "-u", path } },
     { "fusermount3", { "-u", path } },
     { "umount", { path } },
     { "diskutil", { "unmount", path } },
 
-    -- 2. Lazy
     { "fusermount", { "-uz", path } },
     { "fusermount3", { "-uz", path } },
     { "umount", { "-l", path } },
 
-    -- 3. Force (macOS/Universal)
     { "diskutil", { "unmount", "force", path } },
     { "umount", { "-f", path } },
   }

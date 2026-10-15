@@ -9,10 +9,10 @@ local FS = require(".lib-fileservice")
 --- Verify required system dependencies and detect optional ones.
 ---@return boolean
 local function check_dependencies()
-  local _, sshfs_err = Command("sshfs"):arg({ "--version" }):status()
-  if sshfs_err then
+  local _, davfs_err = Command("mount.davfs"):arg({ "--version" }):status()
+  if davfs_err then
     local Notify = require(".lib-notify")
-    Notify.error("sshfs not found — is it installed and in PATH? PATH=%s", os.getenv("PATH") or "(unset)")
+    Notify.error("mount.davfs not found — is davfs2 installed and in PATH? PATH=%s", os.getenv("PATH") or "(unset)")
     return false
   end
   local _, fzf_err = Command("fzf"):arg({ "--version" }):status()
@@ -65,3 +65,4 @@ function M:entry(job)
 end
 
 return M
+
