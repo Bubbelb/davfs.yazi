@@ -20,6 +20,13 @@ A minimal, blazing fast <strong>SSHFS</strong> integration for the <a target="_b
   <a href="./NEWS.md">✨ What's New / 🚨 Breaking Changes</a>
 </p>
 
+# DAVFS Refactor
+I used AI to refactor uhs-robert's SSHFS implementation to play nice with DAVFS. I assumed it wouldn't be that hard, since the tooling is generally the same.
+
+I will gradually change all from sshfs to davfs, if this experiment plays out to be something to explore further.
+
+For now it is completely experimental and YMMV.
+
 ## 🕶️ What does it do?
 
 sshfs.yazi mounts hosts from your SSH config and makes them accessible locally.
